@@ -1,6 +1,7 @@
 import json
 import os
 import time
+from asyncio import timeout
 from typing import List
 
 from eth_account.signers.local import LocalAccount
@@ -10,7 +11,6 @@ from web3.contract import Contract
 from web3.datastructures import AttributeDict
 from web3.middleware import ExtraDataToPOAMiddleware
 from web3.providers import HTTPProvider
-from web3.types import TxParams
 
 RPC_1_URL: str = os.environ["RPC_1_URL"]
 RPC_2_URL: str = os.environ["RPC_2_URL"]
@@ -44,13 +44,15 @@ def handle_bridging(web3_initializer: Web3, contract_initializer: Contract, web3
             can_finalize: bool = contract_finalizer.functions["canFinalizeBridge"](amount).call()
             if can_finalize:
                 bridge_finalize_data = contract_finalizer.encode_abi("finalizeBridge", args=[bridging_id, user, amount])
-                finalization_tx_hash = send_tx(bridge_finalizer_account, contract_finalizer, bridge_finalize_data, web3_finalizer)
+                finalization_tx_hash = send_tx(bridge_finalizer_account, contract_finalizer, bridge_finalize_data,
+                                               web3_finalizer)
                 print(f"Sent to finalizer-chain tx {prettify_tx_hash(finalization_tx_hash)}")
-                receipt = web3_finalizer.eth.wait_for_transaction_receipt(finalization_tx_hash)
+                receipt = web3_finalizer.eth.wait_for_transaction_receipt(finalization_tx_hash, timeout=600)
                 if receipt["status"] == 1:
                     print(f"Bridging finalized successfully")
                     bridge_complete_data = contract_initializer.encode_abi("bridgeCompleted", args=[bridging_id])
-                    complete_tx_hash = send_tx(bridge_initializer_account, contract_initializer, bridge_complete_data, web3_initializer)
+                    complete_tx_hash = send_tx(bridge_initializer_account, contract_initializer, bridge_complete_data,
+                                               web3_initializer)
                     print(f"Bridging was completed with tx hash {prettify_tx_hash(complete_tx_hash)}")
             else:
                 data = contract_initializer.encode_abi("bridgeFailed", args=[bridging_id])
@@ -59,8 +61,10 @@ def handle_bridging(web3_initializer: Web3, contract_initializer: Contract, web3
         print("End of cycle; sleep for 5 seconds")
         time.sleep(5)
 
+
 def prettify_tx_hash(tx_hash: HexBytes):
     return f"0x{tx_hash.hex()}"
+
 
 def send_tx(account: LocalAccount, contract: Contract, data, web3: Web3) -> HexBytes:
     unsigned_tx = {
